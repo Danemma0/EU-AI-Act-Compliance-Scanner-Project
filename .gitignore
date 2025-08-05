@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# JavaScript/React
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+build/
+coverage/
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.*.local
+config/secrets.py
+*.key
+*.pem
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+database/data/
+*.sql
+database_dumps/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+logs/
+temp/
+cache/
+output/
+scan_results/
+reports/generated/
+uploads/
+*.log
+
+# Security/Sensitive
+private_keys/
+certificates/
+credentials/
+api_keys.txt
