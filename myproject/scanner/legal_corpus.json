@@ -1,0 +1,22 @@
+[
+  {
+    "id": "Art_15_3",
+    "title": "Article 15(3): Feedback Loops & Bias",
+    "text": "High-risk AI systems shall be designed to prevent or mitigate the risk of biased feedback loops where the system's own outputs negatively influence future operations or reinforce discriminatory impacts."
+  },
+  {
+    "id": "Art_10_5",
+    "title": "Article 10(5): Data Governance & Privacy",
+    "text": "Training, validation and testing data sets shall be examined for possible biases or unauthorized inclusion of protected personal data, and appropriate measures must be taken to mitigate those risks."
+  },
+  {
+    "id": "Art_50_1",
+    "title": "Article 50(1): AI Transparency",
+    "text": "Providers shall ensure that AI systems intended to interact with natural persons are designed and developed in such a way that natural persons are informed that they are interacting with an AI system, unless this is obvious."
+  },
+  {
+    "id": "Art_15_1",
+    "title": "Article 15(1): Robustness against Manipulation",
+    "text": "High-risk AI systems shall achieve an appropriate level of accuracy, robustness, and cybersecurity, and perform consistently throughout their lifecycle, resisting attempts by unauthorized third parties to alter their use or performance."
+  }
+]

@@ -12,14 +12,13 @@ ENV/
 dist/
 build/
 
-# JavaScript/React
+# JavaScript/Node
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnp
 .pnp.js
-build/
 coverage/
 
 # Environment files
@@ -30,6 +29,10 @@ coverage/
 config/secrets.py
 *.key
 *.pem
+env.list
+
+# Docker environment files (may contain API keys)
+damn-vulnerable-llm-agent/env.list
 
 # Database
 *.db
@@ -38,6 +41,16 @@ config/secrets.py
 database/data/
 *.sql
 database_dumps/
+
+# Flask instance folder (auto-created, contains SQLite DB)
+myproject/instance/
+
+# Generated / cached files
+# corpus_cache.npy is auto-generated on first scan from legal_corpus.json.
+# It is safe to commit (saves OpenAI API credits on fresh clones) but can
+# also be regenerated at any time by deleting it and running a scan.
+# Uncomment the line below if you prefer not to track the binary cache.
+# myproject/scanner/corpus_cache.npy
 
 # IDE
 .vscode/
@@ -53,6 +66,9 @@ database_dumps/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Claude Code local session data
+.claude/
 
 # Project specific
 logs/

@@ -1,0 +1,2167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EU AI Act Compliance Scanner</title>
+
+    <!-- Bootstrap 5 for grid, buttons, modals, badges, etc.
+         I'm loading it from CDN so I don't need to bundle it locally. -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Chart.js for the risk trend line chart and doughnut breakdown charts. -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* ══════════════════════════════════════════════
+           GLOBAL COLOUR VARIABLES — Dark cybersecurity theme
+           I'm using CSS custom properties (variables) here so I only
+           need to change one value to update the colour everywhere.
+           All component-level colours reference these tokens.
+        ══════════════════════════════════════════════ */
+        :root {
+            --bg-base:      #0d1117;   /* main page background — very dark navy */
+            --bg-card:      #161b22;   /* card surface — slightly lighter than base */
+            --bg-card-alt:  #1c2333;   /* alternate card shade for headers/rows */
+            --bg-input:     #0d1117;   /* form inputs match the page background */
+            --border:       #30363d;   /* subtle border colour for cards and dividers */
+            --border-focus: #388bfd;   /* blue glow when an input is focused */
+            --text-primary: #c9d1d9;   /* main body text — soft white */
+            --text-muted:   #8b949e;   /* secondary / label text — grey */
+            --text-heading: #f0f6ff;   /* section headings — brightest white */
+            --accent-red:   #f85149;   /* danger / high severity / scan button */
+            --accent-green: #3fb950;   /* pass / safe / terminal green */
+            --accent-orange:#d29922;   /* medium severity warnings */
+            --accent-yellow:#e3b341;   /* low severity */
+            --accent-blue:  #388bfd;   /* info, links, focus rings */
+            --accent-purple:#bc8cff;   /* multi-turn strategy labels / error badges */
+            --nav-bg:       #010409;   /* navbar — even darker than the page */
+        }
+
+        /* Make every element size itself including padding and border,
+           not excluding them. Avoids layout surprises. */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--color, var(--text-primary));
+            font-size: 0.875rem;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+
+        /* ── Custom scrollbar — thin and dark to match the theme ── */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-base); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        /* ── Navbar — top bar with the app title and reset button ── */
+        .navbar { background-color: var(--nav-bg) !important; border-bottom: 1px solid var(--border); }
+        .navbar-brand { color: var(--text-heading) !important; font-size: 0.95rem; font-weight: 600; }
+        .navbar-brand span.shield { color: var(--accent-blue); margin-right: 6px; }
+
+        /* ── Cards — the main UI building blocks across the whole dashboard ── */
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        /* Card headers are a slightly different shade to visually separate
+           the title from the card body content. */
+        .card-header {
+            background-color: var(--bg-card-alt) !important;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-heading);
+            padding: 0.45rem 0.75rem;
+            font-size: 0.82rem;
+        }
+        .card-body { color: var(--text-primary); padding: 0.6rem 0.75rem; }
+
+        /* ── Section headings — small uppercase labels above groups of cards ── */
+        .section-heading {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 0.4rem;
+            padding-left: 2px;
+        }
+
+        /* ── Form controls — dropdowns, text areas, URL inputs ── */
+        .form-select, .form-control {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 0.82rem;
+        }
+        /* Blue glow when the user clicks into any input field. */
+        .form-select:focus, .form-control:focus {
+            background-color: var(--bg-input);
+            border-color: var(--border-focus);
+            color: var(--text-primary);
+            box-shadow: 0 0 0 2px rgba(56,139,253,0.2);
+        }
+        /* When an input is disabled (e.g. the custom URL box when a non-custom
+           target is selected), darken it and show a not-allowed cursor
+           so the user knows it's inactive. */
+        .form-control:disabled {
+            background-color: #0a0e14;
+            color: #3d444d;
+            border-color: #21262d;
+            cursor: not-allowed;
+            opacity: 1;
+        }
+        /* Active inputs use the normal text cursor. */
+        .form-control:not(:disabled) {
+            cursor: text;
+        }
+        /* Placeholder text needs to be forced to the right colour —
+           Bootstrap overrides it otherwise. */
+        .form-control::placeholder {
+            color: #6e7681 !important;
+            opacity: 1;
+        }
+        .form-control:disabled::placeholder {
+            color: #3d444d !important;
+        }
+        /* Dropdown option backgrounds need to be set explicitly
+           because browser defaults use white. */
+        .form-select option { background-color: var(--bg-card); color: var(--text-primary); }
+
+        /* ── Vulnerability selector cards ── */
+        /* Each vuln type (Prompt Injection, Data Leakage, etc.) is a
+           clickable label card with a hidden checkbox inside it. */
+        .vuln-check-item {
+            background-color: var(--bg-card-alt);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 7px 10px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            transition: border-color 0.15s, background 0.15s;
+        }
+        /* When the user checks a vuln card, highlight it with a red border
+           so it's clearly selected. :has() checks if the checkbox inside is checked. */
+        .vuln-check-item:has(input:checked) {
+            border-color: var(--accent-red);
+            background-color: #1a0e0e;
+        }
+        /* Cards with a title attribute get a faint blue dashed bottom border —
+           this hints to the user that hovering will show a tooltip. */
+        .vuln-check-item[title] { border-bottom: 1px dashed #388bfd44; }
+
+        /* The actual checkbox inside each vuln card. */
+        .form-check-input {
+            background-color: var(--bg-input);
+            border-color: var(--border);
+        }
+        .form-check-input:checked {
+            background-color: var(--accent-red);
+            border-color: var(--accent-red);
+        }
+
+        /* ── Risk score colour classes ── */
+        /* These are applied to the "Risk Score: X / 100" text on each audit card
+           depending on how high the score is. */
+        .risk-high   { color: var(--accent-red);    font-weight: 700; }
+        .risk-medium { color: var(--accent-orange);  font-weight: 700; }
+        .risk-low    { color: var(--accent-yellow);  font-weight: 700; }
+        .risk-safe   { color: var(--accent-green);   font-weight: 700; }
+
+        /* ── Severity and result badges ── */
+        /* Each badge colour maps to a specific severity or result state. */
+        .badge-high    { background-color: var(--accent-red)    !important; color: #fff; }
+        .badge-medium  { background-color: #b7580a              !important; color: #fff; }
+        .badge-low     { background-color: #9e7c0a              !important; color: #fff; }
+        .badge-passed  { background-color: #1a6e31              !important; color: #fff; }
+        .badge-fail    { background-color: var(--accent-red)    !important; color: #fff; }
+        .badge-pending { background-color: #3d444d              !important; color: #c9d1d9; }
+        .badge-error   { background-color: #4c1d95              !important; color: #ddd6fe; }
+
+        /* ── Chart containers ── */
+        /* Fixed height so charts don't collapse or overflow their cards. */
+        .chart-container { position: relative; height: 190px; width: 100%; }
+        .chart-subtitle  { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; }
+
+        /* ── Probe results table ── */
+        .table {
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            margin-bottom: 0;
+        }
+        .table-dark { --bs-table-bg: #1c2333; --bs-table-border-color: var(--border); }
+        /* Override Bootstrap's default white cell background. */
+        .table > :not(caption) > * > * {
+            background-color: transparent;
+            border-bottom-color: var(--border);
+            color: var(--text-primary);
+        }
+        /* Lighten the row on hover so the user knows which row they're on. */
+        .table-hover > tbody > tr:hover > * {
+            background-color: #1c2333;
+            color: var(--text-heading);
+        }
+        /* Column headers — uppercase, muted, smaller font for compactness. */
+        thead th {
+            background-color: #1c2333 !important;
+            color: var(--text-muted) !important;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            border-bottom: 1px solid var(--border) !important;
+        }
+        /* Each row in the probe table is clickable — it opens a detail modal. */
+        #probeTable tbody tr { cursor: pointer; }
+
+        /* ── Terminal log panel ── */
+        /* This is the green-on-black scrolling log window that shows
+           real-time scanner output via SSE (Server-Sent Events). */
+        #terminalPanel {
+            background: #000d00;
+            padding: 10px 14px;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.76rem;
+            color: #3fb950;
+            height: 220px;
+            overflow-y: scroll;
+            line-height: 1.6;
+        }
+
+        /* ── Terminal titlebar (macOS-style window chrome) ── */
+        /* The three coloured dots at the top of the terminal are purely decorative
+           but make it look like a real terminal window. */
+        .terminal-titlebar {
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            padding: 5px 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            user-select: none;
+            border-radius: 8px 8px 0 0;
+            border: 1px solid #3fb950;
+            border-bottom: none;
+        }
+        .terminal-dot  { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
+        .dot-red       { background:#f85149; }
+        .dot-yellow    { background:#e3b341; }
+        .dot-green     { background:#3fb950; }
+        .terminal-title { font-family:'Cascadia Code','Consolas',monospace; font-size:0.72rem;
+                        color:#8b949e; margin-left:4px; flex:1; }
+
+        /* The terminal panel itself gets a green border and soft green glow
+           to reinforce the "hacker terminal" look. */
+        #terminalPanel { border:1px solid #3fb950; border-top:none;
+                        border-radius:0 0 8px 8px; box-shadow:0 0 12px rgba(63,185,80,0.12); }
+
+        /* ── Terminal log line colour classes ── */
+        /* Each line in the terminal gets a colour based on what type of message it is.
+           I check for keywords in JavaScript and assign these classes accordingly. */
+        .log-line  { color:#3fb950; }           /* normal output — green */
+        .log-warn  { color:#e3b341; }           /* warnings — yellow */
+        .log-error { color:#f85149; }           /* errors / fails — red */
+        .log-info  { color:#79c0ff; }           /* info / completed steps — blue */
+        .log-done  { color:#bc8cff; font-weight:700; letter-spacing:0.5px; } /* scan complete — purple */
+
+        /* ── Resizable probe table columns ── */
+        /* Each column header can be dragged to resize the column width.
+           The ::after pseudo-element draws the visible drag handle on the right. */
+        #probeTable th {
+            position: relative;
+            resize: horizontal;
+            overflow: hidden;
+            min-width: 60px;
+        }
+        #probeTable th::after {
+            content: '';
+            position: absolute;
+            right: 0; top: 20%; bottom: 20%;
+            width: 3px;
+            background: #30363d;
+            border-radius: 2px;
+            cursor: col-resize;
+        }
+
+        /* ── Audit cards (the per-scan report cards at the bottom) ── */
+        .audit-card .risk-score { font-size: 1.15rem; font-weight: 700; margin: 0.2rem 0; }
+        .audit-card hr { border-color: var(--border); margin: 0.35rem 0; }
+
+        /* Each vulnerability finding within an audit card is separated by a
+           thin border. The last one has no border so it doesn't look double-bordered. */
+        .vuln-item { padding: 0.3rem 0; border-bottom: 1px solid #21262d; }
+        .vuln-item:last-child { border-bottom: none; }
+
+        /* The evidence text box under each finding — shows the judge's reasoning.
+           The left blue bar visually ties it to the finding above it. */
+        .vuln-evidence {
+            font-size: 0.76rem;
+            color: var(--text-muted);
+            background: #0d1117;
+            border-left: 2px solid #388bfd44;
+            padding: 5px 9px;
+            margin-top: 4px;
+            border-radius: 0 4px 4px 0;
+            white-space: normal;
+        }
+        .vuln-evidence ul { margin: 3px 0 0; padding-left: 16px; }
+        .vuln-evidence ul li { margin-bottom: 1px; }
+
+        /* ── Button overrides — Bootstrap defaults are too light for dark theme ── */
+        .btn-danger  { background-color: #b91c1c; border-color: #991b1b; }
+        .btn-danger:hover { background-color: #991b1b; }
+        .btn-outline-warning { color: var(--accent-orange); border-color: var(--accent-orange); }
+        .btn-outline-warning:hover { background-color: #2a1f06; color: var(--accent-yellow); }
+        .btn-outline-danger  { color: var(--accent-red); border-color: #3d1515; }
+        .btn-outline-danger:hover  { background-color: #1a0808; }
+        .btn-outline-secondary { color: var(--text-muted); border-color: var(--border); }
+        .btn-outline-secondary:hover { background-color: var(--bg-card-alt); color: var(--text-primary); }
+        .btn-sm { font-size: 0.78rem; padding: 0.25rem 0.65rem; }
+
+        /* ── Reset button two-step confirm state ── */
+        /* When the user clicks "Reset Database" once, the button turns red
+           and asks for confirmation. This class handles that visual state. */
+        #resetBtn.confirm-stage {
+            background-color: var(--accent-red) !important;
+            border-color: var(--accent-red) !important;
+            color: #fff !important;
+        }
+
+        /* ── Progress bars (confidence indicator in probe table) ── */
+        .progress { background-color: #21262d; }
+
+        /* ── Info alert (shown when no scans exist yet) ── */
+        .alert-info {
+            background-color: #0d1f38;
+            border-color: #1d3557;
+            color: var(--text-primary);
+            font-size: 0.82rem;
+        }
+
+        /* ── Probe detail modal (shows full payload + response text) ── */
+        .modal-content {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+        .modal-header { border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; }
+        .modal-footer { border-top:    1px solid var(--border); padding: 0.4rem 0.75rem; }
+        /* Bootstrap's close button is white by default — invert it for dark backgrounds. */
+        .btn-close { filter: invert(1) grayscale(1); }
+        /* The payload/response pre blocks inside the modal. */
+        pre.bg-light {
+            background-color: #0d1117 !important;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        /* ── Toast notifications (bottom-right pop-up messages) ── */
+        #toastContainer { position: fixed; bottom: 1.2rem; right: 1.2rem; z-index: 9999; }
+        .toast { font-size: 0.8rem; min-width: 220px; }
+
+        /* ── Responsive layout: probe table takes up 72% width on desktop,
+           full width on smaller screens. ── */
+        .col-probe-table { max-width: 72%; flex: 0 0 72%; }
+        @media (max-width: 991px) { .col-probe-table { max-width: 100%; flex: 0 0 100%; } }
+
+        /* ══════════════════════════════════════════════
+           MULTI-TURN PROBE GROUP CARD
+           When renderProbeTable() detects that multiple ProbeResult rows share
+           the same session_id (i.e. they belong to a multi-turn attack sequence),
+           it renders them inside a single grouped card rather than as individual
+           flat rows. This makes it visually clear that the 4 payloads are a
+           single coordinated conversation, not 4 independent tests.
+        ══════════════════════════════════════════════ */
+
+        /* The outer wrapper row that spans all table columns.
+           No hover highlight — it's a container, not a clickable row. */
+        tr.mt-group-row { cursor: default; }
+        tr.mt-group-row:hover { background: transparent !important; }
+
+        /* The card itself — purple left border to distinguish it from the
+           plain table rows sitting above and below it. */
+        .mt-group-card {
+            border: 1px solid #3a2d5a;
+            border-left: 3px solid var(--accent-purple);
+            border-radius: 6px;
+            background: #12101c;
+            margin: 4px 2px;
+            overflow: hidden;
+        }
+
+        /* Header bar at the top of the card — shows the strategy name,
+           category label, article reference, and the final verdict badge. */
+        .mt-group-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 7px 12px;
+            background: #1a1228;
+            border-bottom: 1px solid #3a2d5a;
+            cursor: pointer; /* the header is clickable to collapse/expand the turns */
+        }
+        .mt-group-header:hover { background: #211535; }
+
+        /* Left side of the header — icon + strategy name + category details. */
+        .mt-header-left { display: flex; align-items: center; gap: 8px; }
+        .mt-strategy-icon { color: var(--accent-purple); font-size: 0.95rem; }
+        .mt-strategy-name {
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--accent-purple);
+            letter-spacing: 0.3px;
+        }
+        .mt-strategy-meta {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        /* Right side of the header — collapse toggle arrow + final verdict badge. */
+        .mt-header-right { display: flex; align-items: center; gap: 8px; }
+        .mt-collapse-arrow {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+            user-select: none;
+        }
+        .mt-collapse-arrow.collapsed { transform: rotate(-90deg); }
+
+        /* The body area that holds all 4 turn rows.
+           CSS max-height transition gives a smooth expand/collapse animation. */
+        .mt-turns-body {
+            padding: 6px 10px 8px 10px;
+            max-height: 800px;
+            overflow: hidden;
+            transition: max-height 0.3s ease, padding 0.2s ease;
+        }
+        .mt-turns-body.collapsed {
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+
+        /* Individual turn row inside the card.
+           A left connector line visually chains the turns together like a
+           conversation thread, making the escalating nature obvious. */
+        .mt-turn-item {
+            display: grid;
+            grid-template-columns: 28px 1fr;
+            gap: 0 8px;
+            margin-bottom: 6px;
+            position: relative;
+        }
+        .mt-turn-item:last-child { margin-bottom: 0; }
+
+        /* The vertical thread line that connects turns 1→2→3→4.
+           It runs from the centre of the turn-number pill to the next one. */
+        .mt-turn-item:not(:last-child)::before {
+            content: '';
+            position: absolute;
+            left: 13px;
+            top: 22px;
+            bottom: -6px;
+            width: 2px;
+            background: #3a2d5a;
+        }
+
+        /* The circular turn-number pill on the left spine. */
+        .mt-turn-num {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: #2a1f48;
+            border: 1px solid #5a3ea0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: var(--accent-purple);
+            flex-shrink: 0;
+            margin-top: 1px;
+            z-index: 1; /* sits above the connector line */
+            position: relative;
+        }
+        /* The final turn pill glows slightly to indicate it is the judged turn. */
+        .mt-turn-num.final-turn {
+            background: #3d1f6e;
+            border-color: var(--accent-purple);
+            box-shadow: 0 0 6px #bc8cff55;
+        }
+
+        /* Text content to the right of the turn-number pill. */
+        .mt-turn-content { min-width: 0; }
+
+        /* Payload line — the attacker's message for this turn. */
+        .mt-turn-payload {
+            font-size: 0.72rem;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 2px;
+            cursor: pointer; /* clicking opens the detail modal for this turn */
+        }
+        .mt-turn-payload:hover { color: var(--accent-blue); text-decoration: underline; }
+
+        /* Response line — the target chatbot's reply, muted to de-emphasise
+           it relative to the payload, which is what the attacker controls. */
+        .mt-turn-response {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Footer strip below the final turn — shows confidence bar + verdict badge
+           and explains the 1.5× scoring multiplier applied to multi-turn final turns. */
+        .mt-verdict-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #2a1f48;
+            flex-wrap: wrap;
+        }
+        .mt-verdict-label {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+        .mt-multiplier-note {
+            font-size: 0.67rem;
+            color: #7a5faa;
+            margin-left: auto;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── Top navbar — app title on the left, Reset Database button on the right ── -->
+<nav class="navbar navbar-dark mb-2 shadow-sm">
+    <div class="container-fluid px-3">
+        <span class="navbar-brand mb-0">
+            <span class="shield">⬡</span>EU AI Act Compliance Scanner
+        </span>
+        <!-- Two-click confirm reset — first click turns it red, second wipes the DB. -->
+        <button class="btn btn-sm btn-outline-warning" id="resetBtn" onclick="handleReset()">
+            🗑 Reset Database
+        </button>
+    </div>
+</nav>
+
+<!-- Toast container — pop-up notifications appear here (bottom-right corner). -->
+<div id="toastContainer"></div>
+
+<div class="container-fluid px-3">
+
+    <!-- ══════════════════════════════════════════════════════
+         HIDDEN DATA ISLAND — chart data passed from Jinja2 to JavaScript
+         Jinja2 can't write directly into JS variables mid-script, so I store
+         the chart data as data-attributes on a hidden div and then read
+         them in JavaScript with JSON.parse(). This keeps the template clean
+         and avoids any quoting issues with inline script injection.
+    ══════════════════════════════════════════════════════ -->
+    <div id="chartData"
+        data-labels='{{ chart_labels | tojson | safe }}'
+        data-scores='{{ chart_scores | tojson | safe }}'
+        data-breakdown='{{ breakdown_data | tojson | safe }}'
+        style="display:none;"></div>
+
+    <!-- ══════════════════════════════════════════════════════
+         SCAN LAUNCHER — where the user configures and kicks off a scan
+         This section contains: target selector, DEMO MODE toggle,
+         vulnerability checkboxes, custom payload input, run/stop buttons,
+         and the live terminal log panel.
+    ══════════════════════════════════════════════════════ -->
+    <div class="card mb-2">
+        <div class="card-header">🔍 Configure &amp; Launch Scan</div>
+        <div class="card-body">
+            <div class="row g-2 align-items-start">
+
+                <!-- ── Column 1: Target selector + DEMO MODE toggle + description ── -->
+                <div class="col-md-4">
+                    <label class="form-label fw-bold mb-1"
+                           style="font-size:0.78rem; color:var(--text-muted);">
+                        TARGET
+                    </label>
+
+                    <!-- Dropdown to pick which chatbot to scan. Changing this
+                         fires handleTargetChange() which updates the description text
+                         below and shows/hides the DEMO MODE toggle. -->
+                    <select class="form-select form-select-sm" id="targetSelector"
+                            onchange="handleTargetChange()">
+                        <option value="deepseek_demo">DeepSeek Demo (API)</option>
+                        <option value="dvla">DVLA (local Docker)</option>
+                        <option value="vulnerable_flask">Vulnerable Flask Chatbot (local)</option>
+                        <option value="custom">Custom API Endpoint</option>
+                    </select>
+
+                    <!-- DEMO MODE toggle — only visible when DeepSeek Demo is selected.
+                         ON (red) = fabricated placeholder results, no real API calls.
+                         OFF (green) = real DeepSeek API is called and the LLM Judge evaluates genuine responses.
+                         The toggle is a custom CSS switch (not a Bootstrap one) so I can
+                         style the track and thumb precisely. -->
+                    <div id="demoModeToggle" style="display:none; margin-top:8px;
+                        padding:6px 10px; background:#0d1117;
+                        border:1px solid #30363d; border-radius:6px;">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span style="font-size:0.78rem; color:var(--text-muted);">
+                                DEMO MODE
+                                <!-- Info tooltip — hover to explain what DEMO MODE means. -->
+                                <span title="When ON: results are randomly fabricated for safe demonstration — no real API calls are made. When OFF: real DeepSeek API is called and genuine vulnerability results are produced."
+                                    style="cursor:help; color:#388bfd; font-size:0.72rem;"> ⓘ</span>
+                            </span>
+                            <label class="d-flex align-items-center gap-2" style="cursor:pointer; margin:0;">
+                                <!-- ON / OFF text label — updated by handleDemoToggle() in JavaScript. -->
+                                <span id="demoModeLabel" style="font-size:0.72rem; color:#f85149;">ON</span>
+                                <!-- Custom toggle switch: the invisible checkbox controls the logical state,
+                                     the styled div below it provides the visual track and thumb. -->
+                                <div style="position:relative; width:36px; height:20px;">
+                                    <input type="checkbox" id="demoModeSwitch"
+                                        style="opacity:0; width:100%; height:100%;
+                                                position:absolute; cursor:pointer; z-index:1; margin:0;"
+                                        onchange="handleDemoToggle(this.checked)">
+                                    <!-- The coloured track behind the thumb. -->
+                                    <div id="demoTrack"
+                                        style="position:absolute; inset:0; background:#b91c1c;
+                                                border-radius:10px; transition:background 0.2s;"></div>
+                                    <!-- The white circle that slides left/right. -->
+                                    <div id="demoThumb"
+                                        style="position:absolute; top:2px; left:2px;
+                                                width:16px; height:16px; background:#fff;
+                                                border-radius:50%; transition:left 0.2s;"></div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Target description text — populated by handleTargetChange() in JavaScript.
+                         Shows a short explanation of the currently selected target
+                         so the user knows what they're about to scan. -->
+                    <div id="targetDescription"
+                        style="font-size:0.74rem; color:var(--text-muted);
+                                margin-top:5px; padding:5px 8px;
+                                background:#0d1117; border-left:2px solid #388bfd44;
+                                border-radius:0 4px 4px 0; min-height:36px;">
+                    </div>
+
+                    <!-- Custom endpoint URL and API key fields.
+                         These stay visible at all times but are disabled until
+                         the user selects "Custom API Endpoint" in the dropdown above.
+                         When enabled, handleTargetChange() clears and activates them. -->
+                    <input type="url" class="form-control form-control-sm mt-1"
+                           id="customUrl" placeholder="Target Chatbot URL"
+                           disabled>
+                    <input type="text" class="form-control form-control-sm mt-1"
+                           id="customApiKey" placeholder="API key (optional)"
+                           disabled>
+                </div>
+
+                <!-- ── Column 2: Vulnerability category checkboxes + custom payload ── -->
+                <div class="col-md-6">
+                    <label class="form-label fw-bold mb-1"
+                           style="font-size:0.78rem; color:var(--text-muted);">
+                        VULNERABILITIES TO SCAN
+                    </label>
+
+                    <!-- Four clickable vuln cards — each wraps a hidden checkbox.
+                         Clicking anywhere on the card toggles it (because the label
+                         wraps the input). The title attribute shows a tooltip with
+                         the OWASP category, EU AI Act article, and description. -->
+                    <div class="row g-1" id="vulnSelector">
+
+                        <!-- Prompt Injection (LLM01 / Article 15) -->
+                        <div class="col-6 col-xl-3">
+                            <label class="vuln-check-item d-flex gap-2 w-100"
+                                       title="LLM01 · Article 15 — Attackers craft inputs that override the chatbot's instructions, causing it to reveal secrets, bypass safety filters, or execute unintended actions. Includes a 4-turn Gradual Jailbreak multi-turn probe.">
+                                <input class="form-check-input flex-shrink-0 mt-0"
+                                       type="checkbox" value="prompt_injection" checked>
+                                <div>
+                                    <div class="fw-bold" style="font-size:0.78rem;">Prompt Injection</div>
+                                    <div style="font-size:0.7rem; color:var(--text-muted);">LLM01 · Art.15</div>
+                                    <!-- Multi-turn strategy name — shown in purple to distinguish it
+                                         from the single-turn hardcoded probes. -->
+                                    <div style="font-size:0.67rem; color:#bc8cff; margin-top:1px;">
+                                        ↬ Gradual Jailbreak
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Data Leakage (LLM02 / Article 10) -->
+                        <div class="col-6 col-xl-3">
+                            <label class="vuln-check-item d-flex gap-2 w-100"
+                                   title="LLM02 · Article 10 — The chatbot inadvertently exposes sensitive data such as API keys, passwords, PII, or internal configuration from its training data or context. Includes a 4-turn Incremental Extraction multi-turn probe.">
+                                <input class="form-check-input flex-shrink-0 mt-0"
+                                       type="checkbox" value="data_leakage">
+                                <div>
+                                    <div class="fw-bold" style="font-size:0.78rem;">Data Leakage</div>
+                                    <div style="font-size:0.7rem; color:var(--text-muted);">LLM02 · Art.10</div>
+                                    <div style="font-size:0.67rem; color:#bc8cff; margin-top:1px;">
+                                        ↬ Incremental Extraction
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Identity Disclosure (LLM07 / Article 50) -->
+                        <div class="col-6 col-xl-3">
+                            <label class="vuln-check-item d-flex gap-2 w-100"
+                                   title="LLM07 · Article 50 — The chatbot denies being an AI or claims to be a human, violating EU AI Act transparency obligations which require users to know they are interacting with an AI system. Includes a 4-turn Persona Drift multi-turn probe.">
+                                <input class="form-check-input flex-shrink-0 mt-0"
+                                       type="checkbox" value="identity_disclosure">
+                                <div>
+                                    <div class="fw-bold" style="font-size:0.78rem;">Identity Disclosure</div>
+                                    <div style="font-size:0.7rem; color:var(--text-muted);">LLM07 · Art.50</div>
+                                    <div style="font-size:0.67rem; color:#bc8cff; margin-top:1px;">
+                                        ↬ Persona Drift
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Bias / Hallucination (LLM09 / Article 10(4)) -->
+                        <div class="col-6 col-xl-3">
+                            <label class="vuln-check-item d-flex gap-2 w-100"
+                                   title="LLM09 · Article 10(4) — The chatbot confidently asserts false information or agrees with biased premises, violating data governance and non-discrimination requirements. Includes a 4-turn Consistency Contradiction multi-turn probe.">
+                                <input class="form-check-input flex-shrink-0 mt-0"
+                                       type="checkbox" value="bias_hallucination">
+                                <div>
+                                    <div class="fw-bold" style="font-size:0.78rem;">Bias / Hallucination</div>
+                                    <div style="font-size:0.7rem; color:var(--text-muted);">LLM09 · Art.10</div>
+                                    <div style="font-size:0.67rem; color:#bc8cff; margin-top:1px;">
+                                        ↬ Consistency Contradiction
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Validation message — shown if the user hits Run Scan
+                         without selecting any vulnerability or providing a custom payload. -->
+                    <div id="vulnValidationMsg" class="text-danger mt-1"
+                         style="display:none; font-size:0.75rem;">
+                        ⚠ Select at least one vulnerability category.
+                    </div>
+
+                    <!-- Custom payload input — optional field where the user can
+                         type their own adversarial prompt. It gets sent alongside the
+                         hardcoded payloads for the selected vuln categories.
+                         Capped at 1000 characters — enforced both here (maxlength)
+                         and again in JavaScript before the fetch call. -->
+                    <div class="mt-2">
+                        <label style="font-size:0.74rem; color:var(--text-muted); font-weight:600;">
+                            CUSTOM PAYLOAD (optional)
+                            <!-- Tooltip explaining what custom payloads do and how input is sanitised. -->
+                            <span title="Enter your own test payload. It will be sent alongside generated payloads for the selected category. Input is sanitised — only plain text is accepted."
+                                style="cursor:help; color:#388bfd;"> ⓘ</span>
+                        </label>
+                        <div class="d-flex gap-2 mt-1">
+                            <textarea id="customPayload" rows="2"
+                                class="form-control form-control-sm"
+                                placeholder="Enter a custom payload to test (plain text only, max 1000 chars)..."
+                                maxlength="1000"
+                                style="font-family: monospace; font-size:0.76rem; resize:vertical; max-height:100px;"></textarea>
+                        </div>
+                        <!-- Live character counter — updated by the 'input' event listener at the bottom. -->
+                        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">
+                            <span id="payloadCharCount">0</span>/1000 characters
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Column 3: Run / Stop / Reset buttons ── -->
+                <div class="col-md-2 d-flex flex-column justify-content-end">
+                    <!-- Primary scan button — disabled while a scan is running. -->
+                    <button class="btn btn-danger btn-sm w-100" id="scanBtn"
+                            onclick="triggerScan()">▶ Run Scan</button>
+
+                    <!-- Stop button — only visible while a scan is running.
+                         Sends a stop signal to the server; the scan finishes
+                         its current payload then exits cleanly. -->
+                    <button class="btn btn-sm btn-outline-danger w-100 mt-1"
+                            id="stopBtn" style="display:none;"
+                            onclick="stopScan()">⏹ Stop Scan</button>
+
+                    <!-- Reset Stop button — clears any leftover stop state from
+                         a previous session. Enabled once a scan starts. -->
+                    <button class="btn btn-sm btn-outline-secondary w-100 mt-1"
+                            id="resetStopBtn" disabled
+                            onclick="resetStopButton()">↻ Reset Stop</button>
+
+                    <!-- Status message area — shows progress text like "Running 2 categories…"
+                         then becomes the "Reload Dashboard" button once the scan finishes. -->
+                    <div id="scanStatusMsg" class="text-muted mt-1"
+                         style="font-size:0.72rem; min-height:16px;"></div>
+                </div>
+
+            </div>
+
+            <!-- ── Terminal log panel ── -->
+            <!-- This macOS-style window shows scanner output in real time via SSE.
+                 The three coloured dots are decorative — they don't close anything.
+                 The spinner appears while the scan is running and disappears when done. -->
+            <div id="terminalWrapper" style="margin-top:10px;">
+                <div class="terminal-titlebar">
+                    <span class="terminal-dot dot-red"></span>
+                    <span class="terminal-dot dot-yellow"></span>
+                    <span class="terminal-dot dot-green"></span>
+                    <span class="terminal-title">scanner@localhost ~ scan output</span>
+                    <span id="terminalSpinner" class="spinner-border spinner-border-sm"
+                        style="width:.65rem;height:.65rem;color:#3fb950;display:none;"></span>
+                </div>
+                <div id="terminalPanel">
+                    <!-- Placeholder text shown before any scan has been run.
+                         Removed by startTerminalLog() once the first scan starts. -->
+                    <div id="terminalPlaceholder" class="log-line"
+                        style="opacity:0.35; font-style:italic;">
+                        $ No logs available — run a scan to see output here
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════
+         ROW 1: Historical risk trend + latest scan breakdown charts
+         These only render if there is at least one completed scan in the database.
+         The chart data was embedded in #chartData by Jinja2 above.
+    ══════════════════════════════════════════════════════ -->
+    {% if scans %}
+    <div class="row g-2 mb-2">
+
+        <!-- Risk score trend line chart — shows all past scans on the x-axis,
+             risk score (0–100) on the y-axis. Helps spot whether targets are
+             getting safer or riskier across repeated scans. -->
+        <div class="col-md-8">
+            <div class="card h-100">
+                <div class="card-header">
+                    Historical Risk Trend (0–100)
+                    <div class="chart-subtitle">
+                        Overall risk score per scan — higher means more vulnerabilities detected
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container"><canvas id="trendChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Doughnut breakdown chart — shows severity distribution (High / Medium / Low /
+             Passed / Error) for just the most recent scan. -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    Latest Scan Breakdown — Scan {{ scans[0].id }}
+                    <div class="chart-subtitle">
+                        Vulnerability severity summary for the most recent scan
+                    </div>
+                </div>
+                <div class="card-body d-flex align-items-center justify-content-center">
+                    <div class="chart-container"><canvas id="breakdownChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ══════════════════════════════════════════════════════
+         ROW 2: Per-scan probe results viewer
+         The user picks a scan from the dropdown; JavaScript fetches the probe
+         data via /api/scan_detail/<id> and renders the charts and table below.
+         The loading overlay covers the section while the fetch is in flight.
+    ══════════════════════════════════════════════════════ -->
+    <div id="probeSection" class="mb-2" style="position:relative;">
+
+        <!-- Loading overlay — covers the entire probe section while data is being fetched.
+             Shown by setting display:flex, hidden by setting display:none. -->
+        <div id="loadingOverlay" style="display:none; position:absolute; inset:0;
+             background:rgba(13,17,23,0.75); z-index:10;
+             align-items:center; justify-content:center;">
+            <div class="spinner-border text-info" role="status" style="width:1.5rem;height:1.5rem;">
+                <span class="visually-hidden">Loading…</span>
+            </div>
+        </div>
+
+        <!-- Scan selector dropdown — lists every scan in the database.
+             Changing the selection triggers loadProbeData() which fetches
+             the probe rows for that scan and re-renders the charts and table. -->
+        <div class="card mb-2">
+            <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+                <span class="fw-bold" style="font-size:0.78rem; color:var(--text-muted);">
+                    VIEW PROBE RESULTS FOR
+                </span>
+                <select class="form-select form-select-sm w-auto" id="scanSelector"
+                        onchange="loadProbeData(this.value)">
+                    <option value="">— select a scan —</option>
+                    {% for scan in scans %}
+                    <option value="{{ scan.id }}">
+                        Scan {{ scan.id }} · {{ format_target(scan.target_url) }} ·
+                        {{ scan.scan_date.strftime('%Y-%m-%d %H:%M') }}
+                        (score: {{ scan.overall_risk_score }})
+                    </option>
+                    {% endfor %}
+                </select>
+
+                <!-- Delete button — only shown once a scan is selected.
+                     Confirms before sending DELETE to /api/delete_scan/<id>. -->
+                <button class="btn btn-sm btn-outline-danger" id="deleteScanBtn"
+                        style="display:none;" onclick="deleteScan()">
+                    🗑 Delete
+                </button>
+
+                <!-- Label showing the target name of the currently selected scan. -->
+                <span id="probeTargetLabel" style="font-size:0.76rem;
+                      color:var(--text-muted);"></span>
+            </div>
+        </div>
+
+        <!-- Charts + probe table — hidden until a scan is selected from the dropdown.
+             Display is managed by loadProbeData() — it removes the inline
+             display:none !important once data has loaded. -->
+        <div class="row g-2" id="probeResultsRow" style="display:none !important;">
+
+            <!-- Left column: two stacked charts for the selected scan.
+                 Top = severity doughnut (Pass/Fail/High/Med/Low/Error).
+                 Bottom = findings bar chart (probe count per vuln category). -->
+            <div class="col-md-4">
+                <div class="card mb-2">
+                    <div class="card-header">
+                        Probe Severity Breakdown
+                        <div class="chart-subtitle">Result label per individual payload fired</div>
+                    </div>
+                    <div class="card-body d-flex align-items-center justify-content-center">
+                        <div class="chart-container" style="height:170px;">
+                            <canvas id="probeSeverityChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        Findings by Category
+                        <div class="chart-subtitle">Probes fired per OWASP category</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" style="height:150px;">
+                            <canvas id="probeCategoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right column: scrollable probe results table.
+                 Each row is one individual probe attempt — clicking a row
+                 opens the detail modal showing the full payload and response. -->
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>All Probe Results
+                            <!-- Badge showing how many probe rows are in the table. -->
+                            <span id="probeCount" class="badge"
+                                  style="background:#21262d; color:var(--text-muted); font-size:0.7rem;">0</span>
+                        </span>
+                        <!-- CSV export button — downloads all visible probe rows as a .csv file. -->
+                        <button class="btn btn-sm btn-outline-secondary" onclick="exportCSV()">
+                            ⬇ CSV
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <!-- table-layout:fixed is required because the columns are resizable.
+                             Without it, the browser would auto-size columns based on content. -->
+                        <div class="table-responsive" style="max-height:380px; overflow-y:auto;">
+                            <table class="table table-hover mb-0" id="probeTable" style="table-layout:fixed; width:100%;">
+                                <thead>
+                                    <tr>
+                                        <th style="width:50px;">#</th>
+                                        <th>Category</th>
+                                        <th>Payload</th>
+                                        <th>Response</th>
+                                        <th>Result</th>
+                                        <th>Conf.</th>
+                                        <th>EU Article</th>
+                                        <th>Src</th>
+                                        <th>Time</th>
+                                    </tr>
+                                </thead>
+                                <!-- Table body is populated by renderProbeTable() in JavaScript. -->
+                                <tbody id="probeTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════
+         ROW 3: Detailed audit report cards
+         One card per scan, rendered server-side by Jinja2.
+         Each card shows: risk score, per-vulnerability findings,
+         severity badges, EU AI Act article links, and the judge's
+         evidence text.
+    ══════════════════════════════════════════════════════ -->
+
+    {#
+        This dict maps each vulnerability type to its EU AI Act article title
+        and a direct link to the official article page. I use it in the loop
+        below to render a clickable "↗ Article X" link next to every
+        High / Medium / Low finding so auditors can jump straight to the law.
+        Passed and error findings don't show a link — there's nothing to cite
+        if no violation was detected.
+    #}
+    {% set vuln_article_links = {
+        'prompt_injection':    ('Article 15: Robustness &amp; Cybersecurity', 'https://artificialintelligenceact.eu/article/15/'),
+        'data_leakage':        ('Article 10: Data Governance',                'https://artificialintelligenceact.eu/article/10/'),
+        'identity_disclosure': ('Article 50: Transparency Obligations',       'https://artificialintelligenceact.eu/article/50/'),
+        'bias_hallucination':  ('Article 15 &amp; 10(4): Non-Discrimination', 'https://artificialintelligenceact.eu/article/15/')
+    } %}
+
+    <div class="section-heading">Detailed Audit Reports</div>
+
+    {% if scans %}
+        <div class="row g-2 mb-3">
+            {% for scan in scans %}
+            <div class="col-md-6 col-xl-4">
+                <div class="card audit-card">
+                    <div class="card-header d-flex justify-content-between">
+                        <strong>Scan {{ scan.id }}</strong>
+                        <span style="color:var(--text-muted); font-size:0.76rem;">
+                            {{ scan.scan_date.strftime('%Y-%m-%d %H:%M') }}
+                        </span>
+                    </div>
+                    <div class="card-body">
+                        <div style="font-size:0.76rem; color:var(--text-muted); margin-bottom:3px;">
+                            Target: {{ format_target(scan.target_url) }}
+                        </div>
+
+                        <!-- Risk score coloured by threshold:
+                             >=70 = High (red), >=40 = Medium (orange),
+                             >0 = Low (yellow), 0 = Safe (green). -->
+                        <div class="risk-score
+                            {% if scan.overall_risk_score >= 70 %} risk-high
+                            {% elif scan.overall_risk_score >= 40 %} risk-medium
+                            {% elif scan.overall_risk_score > 0 %}  risk-low
+                            {% else %} risk-safe {% endif %}">
+                            Risk Score: {{ scan.overall_risk_score }} / 100
+                        </div>
+                        <hr>
+
+                        {# ── Zero-score explanation ───────────────────────────────── #}
+                        {# A score of 0 can mean two very different things:
+                           1. All probes errored out (target unreachable) — shown as a warning.
+                           2. All probes passed with no violations — shown as a green success. #}
+                        {% if scan.overall_risk_score == 0 %}
+                            {% if scan.vulnerabilities | length == 0 %}
+                            <div style="font-size:0.76rem; color:var(--text-muted);
+                                        font-style:italic; padding:4px 0 6px;">
+                                ⚠ No scoreable results — all probes returned errors
+                                or non-relevant responses. Check that the target is
+                                reachable and responding correctly.
+                            </div>
+                            {% else %}
+                            <div style="font-size:0.76rem; color:var(--accent-green);
+                                        font-style:italic; padding:4px 0 6px;">
+                                ✅ Target fully secured — no violations detected across
+                                all tested attack vectors.
+                            </div>
+                            {% endif %}
+                        {% endif %}
+
+                        {# ── Per-vulnerability finding rows ───────────────────────── #}
+                        {# Loop through each vulnerability found in this scan.
+                           Look up the EU AI Act article for this vuln type from
+                           the dict above — used to render the clickable article link. #}
+                        {% for vuln in scan.vulnerabilities %}
+                        {% set art = vuln_article_links.get(vuln.vuln_type, ('', '')) %}
+                        <div class="vuln-item">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-1">
+                                <!-- Vulnerability type name, prettified from snake_case. -->
+                                <strong style="font-size:0.79rem;">
+                                    {{ vuln.vuln_type | replace('_', ' ') | title }}
+                                </strong>
+                                <div class="d-flex align-items-center gap-2">
+                                    <!-- If the vuln passed, show a green Passed badge.
+                                         Otherwise show the severity badge (High/Medium/Low)
+                                         plus a clickable link to the relevant EU AI Act article. -->
+                                    {% if vuln.test_passed %}
+                                        <span class="badge badge-passed rounded-pill px-2"
+                                              style="font-size:0.68rem;">Passed</span>
+                                    {% else %}
+                                        <span class="badge rounded-pill px-2
+                                                    {% if vuln.severity == 'High' %}badge-high
+                                                    {% elif vuln.severity == 'Medium' %}badge-medium
+                                                    {% elif vuln.severity == 'Low' %}badge-low
+                                                    {% endif %}"
+                                            style="font-size:0.68rem;">
+                                            {{ vuln.severity }}
+                                        </span>
+
+                                        {# Clickable EU AI Act article link — opens in a new tab.
+                                           Only shown for non-passed findings since passed probes
+                                           have no article violation to cite. #}
+                                        {% if art[1] %}
+                                        <a href="{{ art[1] }}" target="_blank" rel="noopener noreferrer"
+                                           title="View {{ art[0] }} on the EU AI Act Explorer"
+                                           style="font-size:0.67rem; color:var(--accent-blue);
+                                                  text-decoration:none; white-space:nowrap;">
+                                            ↗ {{ art[0] }}
+                                        </a>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            <!-- Judge's evidence text — split into a bullet list if it
+                                 contains newlines, or shown as plain text if it's one line. -->
+                            {% if vuln.description %}
+                            <div class="vuln-evidence">
+                                {% set lines = vuln.description.split('\n') | reject('equalto','') | list %}
+                                {% if lines | length > 1 %}
+                                    <ul>
+                                    {% for line in lines %}
+                                        {% if line.strip() %}
+                                        <li>{{ line.strip() }}</li>
+                                        {% endif %}
+                                    {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    {{ vuln.description.strip() }}
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <!-- Empty state — shown when no scans have been run yet. -->
+        <div class="alert alert-info text-center py-2">
+            No scans yet. Configure and launch a scan above.
+        </div>
+    {% endif %}
+
+</div><!-- /container -->
+
+<!-- ══════════════════════════════════════════════════════
+     PROBE DETAIL MODAL
+     Shown when the user clicks a row in the probe table.
+     Displays the full (un-truncated) payload text and the
+     chatbot's full response, with copy-to-clipboard buttons.
+══════════════════════════════════════════════════════ -->
+<div class="modal fade" id="probeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title mb-0" style="font-size:0.85rem;">Probe Detail</h6>
+                <button type="button" class="btn-close btn-sm" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="font-size:0.82rem;">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <p class="fw-bold mb-0" style="color:var(--accent-red);">Payload sent</p>
+                    <button class="btn btn-outline-secondary btn-sm py-0 px-2"
+                            style="font-size:0.7rem;"
+                            onclick="copyToClipboard('modalPayload', this)">
+                        📋 Copy
+                    </button>
+                </div>
+                <!-- Full payload text — populated by openProbeModal() in JavaScript. -->
+                <pre id="modalPayload" class="bg-light p-2 rounded"
+                     style="white-space:pre-wrap; font-size:0.78rem;"></pre>
+
+                <div class="d-flex justify-content-between align-items-center mb-1 mt-2">
+                    <p class="fw-bold mb-0" style="color:var(--accent-blue);">Target response</p>
+                    <button class="btn btn-outline-secondary btn-sm py-0 px-2"
+                            style="font-size:0.7rem;"
+                            onclick="copyToClipboard('modalResponse', this)">
+                        📋 Copy
+                    </button>
+                </div>
+                <!-- Full chatbot response text — populated by openProbeModal() in JavaScript. -->
+                <pre id="modalResponse" class="bg-light p-2 rounded"
+                     style="white-space:pre-wrap; font-size:0.78rem;"></pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS bundle (includes Popper for modals, toasts, tooltips). -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// CHART.JS GLOBAL DEFAULTS
+// Set these once so every chart I create inherits dark-theme colours
+// without having to repeat them in each chart's options object.
+// ══════════════════════════════════════════════════════════════════════════════
+Chart.defaults.color           = '#8b949e';     // tick/legend text
+Chart.defaults.borderColor     = '#30363d';     // grid lines
+Chart.defaults.backgroundColor = 'transparent'; // no default fill
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GLOBAL STATE VARIABLES
+// These live at the module level so multiple functions can share them
+// without passing them as arguments every time.
+// ══════════════════════════════════════════════════════════════════════════════
+let probeSeverityChartInst = null;   // reference to the severity doughnut chart instance
+let probeCategoryChartInst = null;   // reference to the category bar chart instance
+let currentProbeRows       = [];     // all probe row objects for the currently selected scan
+let currentScanId          = null;   // ID of the scan the user has selected in the dropdown
+let resetClickCount        = 0;      // tracks how many times Reset was clicked (two-click confirm)
+let resetTimer             = null;   // timeout that reverts the reset button if user doesn't confirm
+let _terminalEventSource   = null;   // the active EventSource connection for SSE log streaming
+let _showReload            = false;  // flag: show "Reload Dashboard" button when scan finishes
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TOAST NOTIFICATIONS
+// Lightweight pop-up messages in the bottom-right corner.
+// type = 'success' (green), 'error' (red), or 'warning' (orange/yellow).
+// Bootstrap auto-hides them after 4 seconds.
+// ══════════════════════════════════════════════════════════════════════════════
+function showToast(msg, type = 'success') {
+    const id = 'toast-' + Date.now();
+    // Pick background and text colours based on the type.
+    const bg = type === 'success' ? '#1a4731'
+             : type === 'error'   ? '#4a1515'
+             :                      '#3a2a06';
+    const tc = type === 'success' ? '#3fb950'
+             : type === 'error'   ? '#f85149'
+             :                      '#e3b341';
+    document.getElementById('toastContainer').insertAdjacentHTML('beforeend', `
+        <div id="${id}" class="toast align-items-center border-0 mb-1"
+             style="background:${bg}; color:${tc};"
+             role="alert" data-bs-autohide="true" data-bs-delay="4000">
+            <div class="d-flex">
+                <div class="toast-body">${msg}</div>
+                <button type="button" class="btn-close btn-sm me-2 m-auto"
+                        style="filter:none; opacity:0.6;" data-bs-dismiss="toast"></button>
+            </div>
+        </div>`);
+    new bootstrap.Toast(document.getElementById(id)).show();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HISTORICAL CHARTS (Trend + Breakdown)
+// These charts use data that Jinja2 injected into the hidden #chartData div.
+// I read the data-attributes and parse the JSON here, then pass it to Chart.js.
+// Only rendered if there is at least one scan in the database — Jinja2 guards this
+// with an if-scans block above, so the canvas elements only exist when needed.
+// ══════════════════════════════════════════════════════════════════════════════
+const chartDataEl   = document.getElementById('chartData');
+const chartLabels   = JSON.parse(chartDataEl.getAttribute('data-labels'));
+const chartScores   = JSON.parse(chartDataEl.getAttribute('data-scores'));
+const breakdownData = JSON.parse(chartDataEl.getAttribute('data-breakdown'));
+
+if (chartLabels && chartLabels.length > 0) {
+    // ── Risk trend line chart ──────────────────────────────────────────────
+    // X-axis = scan labels (e.g. "Scan 1"), Y-axis = risk score (0–100).
+    new Chart(document.getElementById('trendChart').getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: chartLabels,
+            datasets: [{
+                data: chartScores,
+                borderColor: '#f85149',
+                backgroundColor: 'rgba(248,81,73,0.07)',
+                borderWidth: 2, tension: 0.35, fill: true,
+                pointBackgroundColor: '#f85149', pointRadius: 4,
+                pointHoverRadius: 6
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, max: 100,
+                     grid: { color: '#21262d' },
+                     ticks: { color: '#8b949e', font: { size: 10 } },
+                     title: { display: true, text: 'Risk Score',
+                               color: '#8b949e', font: { size: 10 } } },
+                x: { grid: { color: '#21262d' },
+                     ticks: { color: '#8b949e', font: { size: 10 } } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // ── Latest scan breakdown doughnut chart ───────────────────────────────
+    // Slices represent severity categories for the most recent scan only.
+    new Chart(document.getElementById('breakdownChart').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: ['Passed', 'Low', 'Medium', 'High', 'Fail', 'Pending', 'Error'],
+            datasets: [{
+                data: breakdownData,
+                backgroundColor: [
+                    '#1a6e31', '#9e7c0a', '#b7580a', '#b91c1c',
+                    '#7f1d1d', '#3d444d', '#4c1d95'
+                ],
+                borderColor: '#161b22', borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 9, font: { size: 10 }, color: '#8b949e',
+                            // Hide slices with a count of zero to keep the legend clean.
+                            filter: (item, data) => data.datasets[0].data[item.index] > 0 }
+                },
+                tooltip: { callbacks: { label: ctx => {
+                    // Show both the count and the percentage in the tooltip.
+                    const t = ctx.dataset.data.reduce((a,b)=>a+b,0);
+                    return ` ${ctx.label}: ${ctx.parsed} (${t?Math.round(ctx.parsed/t*100):0}%)`;
+                }}}
+            }
+        }
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DEMO MODE TOGGLE HANDLER
+// Called whenever the DEMO MODE checkbox changes state.
+// isChecked=true means the switch is visually ON → real mode (OFF in terms of demo).
+// I invert the meaning: switch ON (checked) = demo OFF (real calls), switch OFF = demo ON.
+// This controls the label text, track colour, and thumb position.
+// ══════════════════════════════════════════════════════════════════════════════
+function handleDemoToggle(isChecked) {
+    const label = document.getElementById('demoModeLabel');
+    const track = document.getElementById('demoTrack');
+    const thumb = document.getElementById('demoThumb');
+    if (isChecked) {
+        // Switch is flipped right → demo is OFF → real API calls will be made.
+        label.textContent = 'OFF';
+        label.style.color = '#3fb950';
+        track.style.background = '#1a6e31';
+        thumb.style.left = '18px';
+    } else {
+        // Switch is flipped left → demo is ON → fabricated placeholder results.
+        label.textContent = 'ON';
+        label.style.color = '#f85149';
+        track.style.background = '#b91c1c';
+        thumb.style.left = '2px';
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TARGET CHANGE HANDLER
+// Called whenever the user changes the target dropdown.
+// Updates three things:
+//   1. Enables/disables the custom URL and API key inputs.
+//   2. Shows/hides the DEMO MODE toggle (only for DeepSeek Demo).
+//   3. Updates the description text below the dropdown.
+// ══════════════════════════════════════════════════════════════════════════════
+function handleTargetChange() {
+    const val = document.getElementById('targetSelector').value;
+    const isCustom = val === 'custom';
+
+    // Enable the URL/API key inputs only when "Custom API Endpoint" is selected.
+    // Clear the values when switching away so stale URLs don't get submitted.
+    ['customUrl','customApiKey'].forEach(id => {
+        const el = document.getElementById(id);
+        el.disabled = !isCustom;
+        if (!isCustom) el.value = '';
+    });
+
+    // Description text for each target — explains what it is and how to use it.
+    const descriptions = {
+        'deepseek_demo': '🤖 <strong>DeepSeek Demo</strong> — Scans the DeepSeek API chatbot, pre-loaded with a mock secret in its system prompt. Use the <em>DEMO MODE</em> toggle to switch between fabricated placeholder results (ON) and real API calls with genuine LLM Judge evaluation (OFF).',
+        'vulnerable_flask': '⚠️ <strong>Vulnerable Flask Chatbot</strong> — A locally hosted Flask chatbot intentionally misconfigured for all four vulnerability categories. No Docker required. Start it first with <code>python vulnerable_target/run_target.py</code> (runs on port 5001).',
+        'dvla': '🎯 <strong>DVLA — Damn Vulnerable LLM Agent</strong> — A locally hosted banking chatbot intentionally vulnerable to prompt injection and data leakage. Requires Docker on port 8501. Each payload waits up to 15 s for a stable response; multi-turn attacks reuse the same chat session.',
+        'custom': '🔗 <strong>Custom API Endpoint</strong> — Scan any chatbot that accepts HTTP POST <code>{"message": "…"}</code> requests and replies with a <code>{"response": "…"}</code> JSON field. <strong>Enter the full endpoint path</strong>, e.g. <code>http://host:port/chat</code> — not just the host root. Optionally add a Bearer token if the API requires auth.'
+    };
+
+    document.getElementById('targetDescription').innerHTML = descriptions[val] || '';
+
+    // Only show the DEMO MODE toggle when DeepSeek Demo is selected.
+    const demoDiv = document.getElementById('demoModeToggle');
+    demoDiv.style.display = val === 'deepseek_demo' ? 'block' : 'none';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COPY TO CLIPBOARD
+// Used by the copy buttons in the probe detail modal.
+// Reads the text content of the element with the given ID, writes it to the
+// clipboard, and briefly changes the button label to confirm success.
+// ══════════════════════════════════════════════════════════════════════════════
+function copyToClipboard(elementId, btn) {
+    const text = document.getElementById(elementId).textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = '✅ Copied';
+        btn.disabled = true;
+        setTimeout(() => {
+            btn.textContent = orig;
+            btn.disabled = false;
+        }, 2000);
+    }).catch(() => {
+        showToast('Copy failed — try selecting text manually.', 'warning');
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TERMINAL LOG — SSE STREAMING
+// Opens a Server-Sent Events connection to /api/scan_log and appends each
+// incoming line to the terminal panel div in real time.
+// Lines are colour-coded based on their content (error, info, warning, etc.).
+// The spinner in the titlebar spins while the connection is open.
+// ══════════════════════════════════════════════════════════════════════════════
+function startTerminalLog() {
+    const panel   = document.getElementById('terminalPanel');
+    const spinner = document.getElementById('terminalSpinner');
+
+    // Clear the placeholder text on first scan and show the spinner.
+    document.getElementById('terminalPlaceholder')?.remove();
+    spinner.style.display = 'inline-block';
+
+    // If there's already an open SSE connection from a previous scan, close it
+    // before opening a new one to avoid duplicate log lines.
+    if (_terminalEventSource) {
+        _terminalEventSource.close();
+        _terminalEventSource = null;
+    }
+
+    _terminalEventSource = new EventSource('/api/scan_log');
+
+    _terminalEventSource.onmessage = function(e) {
+        const line = e.data;
+        const div  = document.createElement('div');
+
+        // Assign a CSS colour class based on what kind of message this is.
+        if (line.includes('[!]') || line.includes('ERROR') || line.includes('FAIL')) {
+            div.className = 'log-error';      // red — something went wrong
+        } else if (line.includes('[+]') || line.includes('COMPLETE') || line.includes('SAFE')) {
+            div.className = 'log-info';       // blue — step completed successfully
+        } else if (line.includes('[*]') || line.includes('[>]')) {
+            div.className = 'log-info';       // blue — progress update
+        } else if (line.includes('WARNING') || line.includes('Retrying')) {
+            div.className = 'log-warn';       // yellow — non-fatal warning
+        } else {
+            div.className = 'log-line';       // green — normal output
+        }
+
+        div.textContent = '> ' + line;
+        panel.appendChild(div);
+
+        // Auto-scroll to the bottom only if the user is already near the bottom.
+        // This avoids yanking them away if they've scrolled up to read earlier lines.
+        const nearBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
+        if (nearBottom) panel.scrollTop = panel.scrollHeight;
+    };
+
+    // The server emits a 'done' event when the scan finishes — stop the spinner
+    // and close the SSE connection cleanly.
+    _terminalEventSource.addEventListener('done', function() {
+        spinner.style.display = 'none';
+        const done = document.createElement('div');
+        done.className   = 'log-done';
+        done.textContent = '> ─── scan complete ───';
+        panel.appendChild(done);
+        panel.scrollTop = panel.scrollHeight;
+        _terminalEventSource.close();
+        _terminalEventSource = null;
+    });
+
+    // If the SSE connection drops unexpectedly (e.g. server crash), stop the spinner
+    // and clean up so the UI doesn't stay stuck in "scanning" state.
+    _terminalEventSource.onerror = function() {
+        spinner.style.display = 'none';
+        if (_terminalEventSource) {
+            _terminalEventSource.close();
+            _terminalEventSource = null;
+        }
+    };
+}
+
+// Stops and cleans up the SSE connection — called if the scan is aborted
+// or if an error occurs before the server sends the 'done' event.
+function stopTerminalLog() {
+    if (_terminalEventSource) {
+        _terminalEventSource.close();
+        _terminalEventSource = null;
+    }
+    document.getElementById('terminalSpinner').style.display = 'none';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TRIGGER SCAN
+// Main function wired to the "Run Scan" button.
+// Validates inputs, sanitises the custom payload, sends a POST to the
+// server to kick off the scan in a background thread, and opens the
+// SSE terminal log to stream progress.
+// ══════════════════════════════════════════════════════════════════════════════
+async function triggerScan() {
+    // Collect which vulnerability categories are checked.
+    const checked = [...document.querySelectorAll('#vulnSelector input:checked')]
+        .map(el => el.value);
+    const customPayloadVal = document.getElementById('customPayload').value.trim();
+    const hasVuln    = checked.length > 0;
+    const hasCustom  = customPayloadVal.length > 0;
+    const valMsg     = document.getElementById('vulnValidationMsg');
+
+    // Block the scan if neither a category nor a custom payload is provided.
+    if (!hasVuln && !hasCustom) {
+        valMsg.textContent = '⚠ Select at least one vulnerability category or enter a custom payload.';
+        valMsg.style.display = 'block';
+        return;
+    }
+    valMsg.style.display = 'none';
+
+    // Declare btn and msg here, BEFORE the first await, to avoid Temporal Dead Zone errors.
+    // If I declared these after an await, JS would throw a ReferenceError when trying
+    // to access them in the finally block.
+    const btn = document.getElementById('scanBtn');
+    const msg = document.getElementById('scanStatusMsg');
+    const rawCustomPayload = document.getElementById('customPayload').value;
+
+    msg.textContent = hasVuln
+        ? `Running ${checked.length} categor${checked.length > 1 ? 'ies' : 'y'}${hasCustom ? ' + custom payload' : ''}…`
+        : `Running custom payload only…`;
+
+    const target    = document.getElementById('targetSelector').value;
+    const customUrl = document.getElementById('customUrl').value.trim();
+    const customKey = document.getElementById('customApiKey').value.trim();
+
+    // Block submission if 'Custom API Endpoint' is selected but no URL was entered.
+    if (target === 'custom' && !customUrl) {
+        showToast('Enter a custom endpoint URL first.', 'warning'); return;
+    }
+
+    // Disable the run button and show the stop button while scanning.
+    btn.disabled    = true;
+    btn.textContent = '⏳ Scanning…';
+    msg.textContent = `Running ${checked.length} probe(s)…`;
+    _showReload     = false;
+
+    // Sanitise the custom payload before sending:
+    // - Strip any HTML tags (prevents XSS if the payload somehow gets rendered).
+    // - Remove non-printable characters (only allow standard ASCII + newline/tab).
+    // - Trim whitespace.
+    // - Slice to 1000 characters as the hard cap.
+    const customPayload = rawCustomPayload
+        .replace(/<[^>]*>/g, '')
+        .replace(/[^\x20-\x7E\n\t]/g, '')
+        .trim()
+        .slice(0, 1000);
+
+    // Show the stop and reset-stop buttons now that a scan is starting.
+    document.getElementById('stopBtn').style.display = 'block';
+    document.getElementById('resetStopBtn').disabled = false;
+
+    // Clear any leftover stop flag from a previous scan before starting this one.
+    try {
+        await fetch('/api/clear_stop', { method: 'POST' });
+    } catch { /* non-fatal — the scan can still proceed */ }
+
+    // Open the SSE terminal log immediately so the user sees output as it arrives.
+    startTerminalLog();
+
+    try {
+        const res  = await fetch('/trigger_api_scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                target:          target,
+                vuln_categories: checked,
+                custom_url:      customUrl,
+                custom_api_key:  customKey,
+                // demo_mode_off=true means the real API should be used (DEMO MODE is OFF).
+                demo_mode_off:   document.getElementById('demoModeSwitch')?.checked || false,
+                custom_payload:  customPayload || null
+            })
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            showToast(`✅ ${data.message}`);
+            _showReload = true; // scan finished — offer a reload button
+        } else {
+            showToast(`❌ ${data.message}`, 'error');
+        }
+    } catch {
+        // Network error — server might be down or unreachable.
+        stopTerminalLog();
+        showToast('❌ Network error. Is the server running?', 'error');
+    } finally {
+        // Always re-enable the run button and hide the stop button when done.
+        btn.disabled    = false;
+        btn.textContent = '▶ Run Scan';
+        document.getElementById('stopBtn').style.display   = 'none';
+        document.getElementById('stopBtn').disabled        = false;
+        document.getElementById('stopBtn').textContent     = '⏹ Stop Scan';
+        document.getElementById('resetStopBtn').disabled   = true;
+
+        // If the scan succeeded or was manually stopped, show a "Reload Dashboard"
+        // button so the user can see the new results without manually refreshing.
+        // If it errored, just clear the status text.
+        if (_showReload) {
+            msg.innerHTML = `<button onclick="window.location.reload()"
+                style="background:#1a6e31; color:#3fb950; border:1px solid #3fb950;
+                       border-radius:4px; padding:2px 10px; font-size:0.75rem; cursor:pointer;">
+                🔄 Reload Dashboard
+            </button>`;
+        } else {
+            msg.textContent = '';
+        }
+        _showReload = false;
+    }
+}
+
+// Keyboard shortcut: Ctrl+Enter anywhere on the page triggers a scan,
+// same as clicking the "Run Scan" button.
+document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === 'Enter') triggerScan();
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STOP SCAN
+// Sends a stop signal to the server. The background scan thread checks this
+// flag after each payload and exits cleanly — it doesn't kill mid-probe.
+// The button is then disabled and shows "Stopping…" until the thread finishes.
+// ══════════════════════════════════════════════════════════════════════════════
+async function stopScan() {
+    await fetch('/api/stop_scan', { method: 'POST' });
+    showToast('⏹ Stop signal sent — scan will halt after current payload.', 'warning');
+    document.getElementById('stopBtn').disabled    = true;
+    document.getElementById('stopBtn').textContent = '⏹ Stopping…';
+    _showReload = true; // once the thread exits, show the reload button
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RESET STOP BUTTON
+// Two behaviours depending on whether a scan is actively running:
+//   - If running: sends a stop signal AND reloads the page after a short delay.
+//   - If idle: just clears the stop flag on the server and tidies the UI.
+// This is useful for recovering from a stuck state after a scan error.
+// ══════════════════════════════════════════════════════════════════════════════
+function resetStopButton() {
+    const scanBtn = document.getElementById('scanBtn');
+    const isScanRunning = scanBtn.disabled; // the scan button is disabled while scanning
+
+    if (isScanRunning) {
+        // Cancel the active scan and reload to clear everything.
+        fetch('/api/stop_scan', { method: 'POST' }).finally(() => {
+            stopTerminalLog();
+            showToast('⏹ Scan cancelled — resetting.', 'warning');
+            setTimeout(() => window.location.reload(), 1200);
+        });
+    } else {
+        // Just clear the server-side stop flag and hide the stop/reset buttons.
+        fetch('/api/clear_stop', { method: 'POST' });
+        document.getElementById('stopBtn').style.display = 'none';
+        document.getElementById('resetStopBtn').disabled = true;
+        showToast('↻ Stop state cleared.', 'success');
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROBE DATA LOADER
+// Called when the user picks a scan from the "VIEW PROBE RESULTS FOR" dropdown.
+// Fetches the probe rows, severity breakdown, and category breakdown from the
+// server via /api/scan_detail/<id>, then renders them into the charts and table.
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadProbeData(scanId) {
+    if (!scanId) {
+        // If the user selects the blank "— select a scan —" option, hide everything.
+        document.getElementById('deleteScanBtn').style.display = 'none';
+        document.getElementById('probeResultsRow').style.removeProperty('display');
+        document.getElementById('probeResultsRow').style.display = 'none';
+        return;
+    }
+    currentScanId = scanId;
+    document.getElementById('deleteScanBtn').style.display = 'inline-block';
+    document.getElementById('loadingOverlay').style.display = 'flex';
+
+    try {
+        const res  = await fetch(`/api/scan_detail/${scanId}`);
+        const data = await res.json();
+        currentProbeRows = data.rows || [];
+        // Show the target name next to the dropdown.
+        document.getElementById('probeTargetLabel').textContent =
+            data.target ? `→ ${data.target}` : '';
+        renderProbeCharts(data.severity_breakdown, data.category_breakdown);
+        renderProbeTable(data.rows);
+        // Reveal the charts and table (removing the display:none !important inline style).
+        document.getElementById('probeResultsRow').style.removeProperty('display');
+    } catch {
+        showToast('Could not load probe results.', 'error');
+    } finally {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROBE CHARTS
+// Renders two Chart.js charts for the currently selected scan:
+//   1. Severity doughnut — proportion of pass/fail/high/medium/low/error probes.
+//   2. Category bar chart — how many probes were fired per OWASP vuln category.
+// Destroys any existing chart instances first to avoid memory leaks and
+// "canvas already in use" errors from Chart.js.
+// ══════════════════════════════════════════════════════════════════════════════
+function renderProbeCharts(sev, cat) {
+    if (probeSeverityChartInst) probeSeverityChartInst.destroy();
+    if (probeCategoryChartInst) probeCategoryChartInst.destroy();
+
+    // Keys match what the server returns in severity_breakdown.
+    const sevL = ['pass','low','medium','high','fail','pending','error'];
+    const sevC = ['#1a6e31','#9e7c0a','#b7580a','#b91c1c','#7f1d1d','#3d444d','#4c1d95'];
+    const sevD = ['Pass','Low','Medium','High','Fail','Pending','Error'];
+
+    probeSeverityChartInst = new Chart(
+        document.getElementById('probeSeverityChart').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: sevD,
+            datasets: [{ data: sevL.map(l=>sev[l]||0),
+                         backgroundColor: sevC,
+                         borderColor: '#161b22', borderWidth: 2 }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom',
+                          labels: { boxWidth: 9, font:{size:9}, color:'#8b949e' } },
+                tooltip: { callbacks: { label: ctx => {
+                    const t=ctx.dataset.data.reduce((a,b)=>a+b,0);
+                    return ` ${ctx.label}: ${ctx.parsed} (${t?Math.round(ctx.parsed/t*100):0}%)`;
+                }}}
+            }
+        }
+    });
+
+    // Convert the category dict to parallel arrays of labels and values,
+    // then prettify the snake_case keys (e.g. "prompt_injection" → "Prompt Injection").
+    const catK = Object.keys(cat);
+    const catV = Object.values(cat);
+    const catL = catK.map(k=>k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()));
+
+    probeCategoryChartInst = new Chart(
+        document.getElementById('probeCategoryChart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: catL,
+            datasets: [{
+                data: catV,
+                backgroundColor: ['#1d3c8a','#3a0ca3','#6b21a8','#9d174d'],
+                borderRadius: 3
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize:1, font:{size:9}, color:'#8b949e' },
+                     grid: { color:'#21262d' } },
+                x: { ticks: { font:{size:9}, color:'#8b949e' }, grid: { display:false } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+// ── Multi-turn strategy name lookup ──────────────────────────────────────────
+// Maps each vulnerability category key to the name of the multi-turn attack
+// strategy that was used for it. These names match what the engine executes
+// in orchestrator.py (generate_next_turn blueprints).
+const MT_STRATEGY_NAMES = {
+    'prompt_injection':    'Gradual Jailbreak',
+    'data_leakage':        'Incremental Extraction',
+    'identity_disclosure': 'Persona Drift',
+    'bias_hallucination':  'Consistency Contradiction'
+};
+
+// ── Badge class helper ────────────────────────────────────────────────────────
+// Maps a result_label string to the correct CSS badge class.
+// Used by both the flat single-turn rows and the multi-turn group verdict badge.
+function resultBadgeClass(result) {
+    return ({
+        high:    'badge-high',
+        medium:  'badge-medium',
+        low:     'badge-low',
+        pass:    'badge-passed',
+        fail:    'badge-fail',
+        pending: 'badge-pending',
+        error:   'badge-error'
+    })[result] || 'bg-secondary';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RENDER PROBE TABLE
+// Populates #probeTableBody with one entry per probe result.
+//
+// Single-turn probes (hardcoded + dynamic) are rendered as a flat <tr> row,
+// exactly as before.
+//
+// Multi-turn probes are detected by finding session_ids that appear more than
+// once in the rows array — all 4 turns of a sequence share one session_id
+// (set in engine.py _run_multi_turn_block). Those rows are wrapped together
+// in a single purple-bordered group card so users can see the full escalating
+// conversation at a glance, rather than 4 disconnected flat rows.
+// ══════════════════════════════════════════════════════════════════════════════
+function renderProbeTable(rows) {
+    const tbody = document.getElementById('probeTableBody');
+    tbody.innerHTML = '';
+    document.getElementById('probeCount').textContent = rows.length;
+
+    // Empty state — show a placeholder row if the scan has no results yet.
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-3"
+            style="color:var(--text-muted); font-size:0.78rem;">No probe results for this scan.</td></tr>`;
+        return;
+    }
+
+    // ── Pass 1: identify multi-turn session groups ────────────────────────────
+    // Count how many rows share each session_id. Any session_id that appears
+    // more than once belongs to a multi-turn conversation. Single-turn probes
+    // each get their own unique session_id (generated by default in models.py),
+    // so they will never accidentally appear in the group map.
+    const sessionCounts = {};
+    rows.forEach(r => {
+        if (r.session_id) sessionCounts[r.session_id] = (sessionCounts[r.session_id] || 0) + 1;
+    });
+
+    // Build a map of session_id → [rows in order] for every multi-turn group.
+    const multiTurnGroups = {};
+    rows.forEach(r => {
+        if (r.session_id && sessionCounts[r.session_id] > 1) {
+            if (!multiTurnGroups[r.session_id]) multiTurnGroups[r.session_id] = [];
+            multiTurnGroups[r.session_id].push(r);
+        }
+    });
+
+    // Track which session_ids have already been rendered as a group card so
+    // we skip individual rows that belong to an already-rendered group.
+    const renderedSessions = new Set();
+
+    // Running counter for the # column — only increments for visible entries
+    // (one group card counts as one entry, not four).
+    let displayIndex = 1;
+
+    // ── Pass 2: render rows ───────────────────────────────────────────────────
+    rows.forEach(row => {
+
+        // ── Multi-turn group rendering ────────────────────────────────────────
+        // If this row belongs to a multi-turn group and the group hasn't been
+        // rendered yet, build the full group card and insert it as a single <tr>.
+        if (row.session_id && multiTurnGroups[row.session_id] && !renderedSessions.has(row.session_id)) {
+            renderedSessions.add(row.session_id);
+
+            const groupRows   = multiTurnGroups[row.session_id];
+            const category    = groupRows[0].category;
+            const article     = groupRows[0].article;
+            const strategyName = MT_STRATEGY_NAMES[category] || 'Multi-Turn Probe';
+
+            // The final turn (highest turn number) is the one the LLM Judge
+            // evaluated — it carries the real verdict, confidence, and result.
+            const finalTurn = groupRows.reduce((a, b) => (a.turn > b.turn ? a : b));
+            const finalBc   = resultBadgeClass(finalTurn.result);
+
+            // Build the HTML for each individual turn inside the group card.
+            // Turns are sorted by turn_number so they always appear in order.
+            const sortedTurns = [...groupRows].sort((a, b) => a.turn - b.turn);
+            const turnsHtml = sortedTurns.map((t, idx) => {
+                const isFinal      = idx === sortedTurns.length - 1;
+                const numClass     = isFinal ? 'mt-turn-num final-turn' : 'mt-turn-num';
+                const payloadShort = escHtml(t.payload_full.length > 110 ? t.payload_full.slice(0, 110) + '…' : t.payload_full);
+                const respShort    = escHtml((t.response_full || t.response).length > 120
+                                        ? (t.response_full || t.response).slice(0, 120) + '…'
+                                        : (t.response_full || t.response));
+
+                // The verdict + confidence bar strip only appears on the final turn
+                // because that is the only turn the LLM Judge evaluated.
+                // Non-final turns have result_label='pending' by design.
+                const verdictHtml = isFinal ? `
+                    <div class="mt-verdict-row">
+                        <span class="mt-verdict-label">Judge verdict:</span>
+                        <span class="badge ${finalBc} rounded-pill px-2" style="font-size:0.66rem;">
+                            ${finalTurn.result.toUpperCase()}
+                        </span>
+                        <div class="progress" style="height:5px; width:60px;">
+                            <div class="progress-bar ${finalTurn.result==='pass'?'bg-success':'bg-danger'}"
+                                 style="width:${finalTurn.confidence}%"></div>
+                        </div>
+                        <small style="color:var(--text-muted); font-size:0.68rem;">${finalTurn.confidence}%</small>
+                        <!-- Multi-turn final turns score at 1.5× in the risk formula (engine.py).
+                             This note reminds reviewers why a multi-turn fail can raise the score
+                             more than a single-turn fail of the same severity. -->
+                        <span class="mt-multiplier-note">⚡ 1.5× risk multiplier applied</span>
+                    </div>` : '';
+
+                return `
+                <div class="mt-turn-item">
+                    <div class="${numClass}" title="Turn ${t.turn}">${t.turn}</div>
+                    <div class="mt-turn-content">
+                        <!-- Clicking the payload line opens the full detail modal for this turn. -->
+                        <div class="mt-turn-payload" title="${escHtml(t.payload_full)}"
+                             onclick="event.stopPropagation(); openProbeModal(${JSON.stringify(t).replace(/</g,'\\u003c').replace(/"/g,'&quot;')})">
+                            ▶ ${payloadShort}
+                        </div>
+                        <div class="mt-turn-response" title="${escHtml(t.response_full || t.response)}">
+                            ↳ ${respShort}
+                        </div>
+                        ${verdictHtml}
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Unique ID for this group's collapsible body — needed so multiple
+            // group cards on the same page don't share toggle references.
+            const bodyId = `mt-body-${row.session_id.slice(0,8)}`;
+
+            // The full group card HTML, inserted as a single <td> spanning all
+            // 9 table columns so the card stretches the full table width.
+            const tr = document.createElement('tr');
+            tr.className = 'mt-group-row';
+            tr.innerHTML = `
+            <td colspan="9" style="padding: 4px 6px;">
+                <div class="mt-group-card">
+
+                    <!-- Header bar: click to expand/collapse the turn list. -->
+                    <div class="mt-group-header" onclick="toggleMtGroup('${bodyId}', this)">
+                        <div class="mt-header-left">
+                            <span class="mt-strategy-icon">↬</span>
+                            <div>
+                                <div class="mt-strategy-name">
+                                    MULTI-TURN PROBE · ${strategyName}
+                                </div>
+                                <!-- Shows the category, article reference, turn count,
+                                     and the row number in the overall probe table. -->
+                                <div class="mt-strategy-meta">
+                                    #${displayIndex} · ${category.replace(/_/g,' ')} · ${article} · ${sortedTurns.length} turns
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-header-right">
+                            <!-- Final verdict badge in the header so the result is
+                                 visible even when the group is collapsed. -->
+                            <span class="badge ${finalBc} rounded-pill px-2" style="font-size:0.66rem;">
+                                ${finalTurn.result.toUpperCase()}
+                            </span>
+                            <!-- Arrow rotates 90° when collapsed (CSS transition). -->
+                            <span class="mt-collapse-arrow" title="Click to expand/collapse">▾</span>
+                        </div>
+                    </div>
+
+                    <!-- Turn list body — collapsible via toggleMtGroup(). -->
+                    <div class="mt-turns-body" id="${bodyId}">
+                        ${turnsHtml}
+                    </div>
+
+                </div>
+            </td>`;
+            tbody.appendChild(tr);
+            displayIndex++;
+            return; // skip — this row is now part of the group card above
+        }
+
+        // Skip rows already consumed by a rendered multi-turn group card.
+        if (row.session_id && renderedSessions.has(row.session_id)) return;
+
+        // ── Single-turn row rendering ─────────────────────────────────────────
+        // Standard flat <tr> for hardcoded, dynamic, and custom single-turn probes.
+        const bc = resultBadgeClass(row.result);
+        const tr = document.createElement('tr');
+        tr.onclick = () => openProbeModal(row);
+
+        // Payload and response are truncated in the table to prevent cell overflow.
+        // The full versions are stored in payload_full / response_full and shown
+        // when the user clicks a row to open the detail modal.
+        tr.innerHTML = `
+            <td style="color:var(--text-muted);">${displayIndex}</td>
+            <td>${row.category.replace(/_/g,' ')}</td>
+            <td style="max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                title="${escHtml(row.payload_full)}">${escHtml(row.payload)}</td>
+            <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis;
+                    white-space:nowrap; font-size:0.78rem; color:var(--text-muted);"
+                title="${escHtml(row.response_full || row.response)}">
+                ${escHtml(row.response)}
+            </td>
+            <td><span class="badge ${bc} rounded-pill px-2" style="font-size:0.68rem;">
+                ${row.result.toUpperCase()}</span></td>
+            <td>
+                <!-- Confidence shown as a thin progress bar + percentage label. -->
+                <div class="progress" style="height:5px; min-width:45px;">
+                    <div class="progress-bar ${row.result==='pass'?'bg-success':'bg-danger'}"
+                         style="width:${row.confidence}%"></div>
+                </div>
+                <small style="color:var(--text-muted); font-size:0.7rem;">${row.confidence}%</small>
+            </td>
+            <td><small style="color:var(--text-muted);">${row.article}</small></td>
+            <!-- ⚡ = GPT-4o-mini generated payload, 📋 = hardcoded research dataset payload -->
+            <td><small style="color:var(--text-muted);">${row.source==='dynamic'?'⚡':'📋'}</small></td>
+            <td><small style="color:var(--text-muted);">${row.timestamp}</small></td>`;
+        tbody.appendChild(tr);
+        displayIndex++;
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TOGGLE MULTI-TURN GROUP
+// Called when the user clicks the header of a multi-turn group card.
+// Adds/removes the 'collapsed' CSS class on the body div, which triggers the
+// max-height transition defined in the stylesheet, and rotates the arrow icon.
+// ══════════════════════════════════════════════════════════════════════════════
+function toggleMtGroup(bodyId, headerEl) {
+    const body  = document.getElementById(bodyId);
+    const arrow = headerEl.querySelector('.mt-collapse-arrow');
+    if (!body) return;
+    body.classList.toggle('collapsed');
+    if (arrow) arrow.classList.toggle('collapsed');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROBE DETAIL MODAL
+// Opens the Bootstrap modal and populates it with the full (untruncated)
+// payload text and chatbot response for the row that was clicked.
+// ══════════════════════════════════════════════════════════════════════════════
+function openProbeModal(row) {
+    document.getElementById('modalPayload').textContent  = row.payload_full  || row.payload;
+    document.getElementById('modalResponse').textContent = row.response_full || row.response;
+    new bootstrap.Modal(document.getElementById('probeModal')).show();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DELETE SCAN
+// Asks for confirmation then sends a DELETE request to /api/delete_scan/<id>.
+// Cascade deletes in the database will also remove all Vulnerability and
+// ProbeResult records linked to this scan.
+// ══════════════════════════════════════════════════════════════════════════════
+async function deleteScan() {
+    if (!currentScanId) return;
+    if (!confirm(`Permanently delete Scan ${currentScanId} and all its data?`)) return;
+    try {
+        const res  = await fetch(`/api/delete_scan/${currentScanId}`, { method:'DELETE' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(`🗑 Scan ${currentScanId} deleted.`);
+            setTimeout(() => window.location.reload(), 1200); // reload to update the dropdown and audit cards
+        } else { showToast(data.message, 'error'); }
+    } catch { showToast('Deletion failed. Check server logs.', 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DATABASE RESET — two-click confirm
+// First click: button turns red and says "⚠ Confirm Reset?", starts a 5-second
+//              timer that reverts it if the user doesn't follow through.
+// Second click: wipes the database and reloads the dashboard.
+// This two-step pattern prevents accidental resets from a single misclick.
+// ══════════════════════════════════════════════════════════════════════════════
+function handleReset() {
+    const btn = document.getElementById('resetBtn');
+    resetClickCount++;
+    if (resetClickCount === 1) {
+        btn.classList.add('confirm-stage');
+        btn.textContent = '⚠ Confirm Reset?';
+        // Auto-revert if the user doesn't click again within 5 seconds.
+        resetTimer = setTimeout(() => {
+            resetClickCount = 0;
+            btn.classList.remove('confirm-stage');
+            btn.textContent = '🗑 Reset Database';
+        }, 5000);
+        return;
+    }
+    // Second click — user confirmed. Clear the timer and wipe the database.
+    clearTimeout(resetTimer);
+    resetClickCount = 0;
+    btn.classList.remove('confirm-stage');
+    btn.disabled = true;
+    btn.textContent = '⏳ Resetting…';
+    fetch('/api/reset_database', { method:'POST' })
+        .then(r=>r.json())
+        .then(d => {
+            if (d.status==='success') { showToast('✅ Database reset.'); setTimeout(()=>location.reload(),1200); }
+            else showToast(d.message,'error');
+        })
+        .catch(()=>showToast('Reset failed.','error'))
+        .finally(()=>{ btn.disabled=false; btn.textContent='🗑 Reset Database'; });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CSV EXPORT
+// Converts the currently loaded probe rows into a CSV string and triggers a
+// browser download. Uses currentProbeRows which was populated by loadProbeData().
+// Wraps payload and response in quotes and escapes any inner quotes.
+// ══════════════════════════════════════════════════════════════════════════════
+function exportCSV() {
+    if (!currentProbeRows.length) return;
+    const h = ['#','Category','Result','Confidence','Source','EU Article','Turn','Timestamp','Payload','Response'];
+    const lines = [h.join(',')];
+    currentProbeRows.forEach((r,i)=>lines.push([
+        i+1,r.category,r.result,r.confidence,r.source,r.article,r.turn,r.timestamp,
+        `"${(r.payload_full||r.payload).replace(/"/g,'""')}"`,
+        `"${(r.response_full||r.response).replace(/"/g,'""')}"`
+    ].join(',')));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'}));
+    a.download = `scan_${currentScanId}_results.csv`;
+    a.click();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HTML ESCAPE HELPER
+// Prevents XSS when inserting user-supplied text (payload, response) into
+// innerHTML. Escapes &, <, >, and " — the four main HTML injection vectors.
+// ══════════════════════════════════════════════════════════════════════════════
+function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WINDOW EVENT LISTENERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Before the tab or window closes (or the user navigates away), send a stop
+// signal to the server so any running scan exits after its current payload.
+// keepalive:true ensures the fetch completes even after the page starts unloading.
+window.addEventListener('beforeunload', function () {
+    fetch('/api/stop_scan', {
+        method:    'POST',
+        keepalive: true,
+        headers:   { 'Content-Type': 'application/json' }
+    });
+});
+
+// When the page finishes loading, do four things:
+//   1. Send an abort_on_reload signal in case a scan was interrupted by a previous
+//      page reload — this cleans up any ghost scan state on the server.
+//   2. Call handleTargetChange() to initialise the description text for the
+//      default target (DeepSeek Demo) without the user having to change the dropdown.
+//   3. Auto-select the most recent scan in the dropdown and load its probe data.
+//   4. Wire up the custom payload textarea to the live character counter.
+window.addEventListener('DOMContentLoaded', () => {
+    fetch('/api/abort_on_reload', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.was_running) {
+                showToast('⚠ A previous scan was interrupted and cleaned up.', 'warning');
+            }
+        })
+        .catch(() => {});
+
+    handleTargetChange();
+
+    // Auto-select the first real option (index 1) so the probe table is
+    // immediately populated when the user lands on the dashboard.
+    const sel = document.getElementById('scanSelector');
+    if (sel && sel.options.length > 1) { sel.selectedIndex = 1; loadProbeData(sel.value); }
+
+    // Update the character counter in real time as the user types.
+    document.getElementById('customPayload').addEventListener('input', function () {
+        document.getElementById('payloadCharCount').textContent = this.value.length;
+    });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+# docker-compose.yml
+services:
+  dvla:
+    image: dvla         # Use the appropriate image for your application
+    ports:
+      - "8501:8501"     # Map port 8501 of the container to port 8501 on the host
+    env_file:
+      - env.list         # Load environment variables from env.list file
